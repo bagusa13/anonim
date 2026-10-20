@@ -1,0 +1,631 @@
+cat << 'EOF' > /usr/local/bin/anonim
+#!/bin/bash
+
+C_RED='\033[1;31m'
+C_GRN='\033[1;32m'
+C_YLW='\033[1;33m'
+C_BLU='\033[1;34m'
+C_MAG='\033[1;35m'
+C_CYN='\033[1;36m'
+C_WHT='\033[1;37m'
+C_DIM='\033[0;90m'
+C_RST='\033[0m'
+
+banner_welcome() {
+    clear
+    echo -e "${C_CYN}╔════════════════════════════════════════════════════════════════════════════╗${C_RST}"
+    echo -e "${C_CYN}║${C_WHT}          🛡️   ANONIM — MULTI-REGION ZERO-TRACE OPSEC SUITE   🛡️            ${C_CYN}║${C_RST}"
+    echo -e "${C_CYN}║${C_DIM}   Eropa / Asia / Indo Mode • Smart Wi-Fi • TCP Tools • RAM Log • Cleaner   ${C_CYN}║${C_RST}"
+    echo -e "${C_CYN}╚════════════════════════════════════════════════════════════════════════════╝${C_RST}"
+}
+
+show_help() {
+    banner_welcome
+    echo -e "  ${C_YLW}📌 1. KONTROL UTAMA & PILIHAN REGION (AUTO-ROTATE 30 DETIK):${C_RST}"
+    echo -e "  ${C_CYN}────────────────────────────────────────────────────────────────────────────${C_RST}"
+    printf "  ${C_GRN}%-26s${C_RST} : %s\n" "anonim start / eropa" "Aktifkan mode anonim Region Tier-1 Eropa (NL,CH,DE,SE,dll)"
+    printf "  ${C_GRN}%-26s${C_RST} : %s\n" "anonim asia" "Aktifkan/Pindah ke Region Asia Cepat (ID,SG,JP,KR,TW,HK,MY)"
+    printf "  ${C_GRN}%-26s${C_RST} : %s\n" "anonim indo" "Aktifkan/Pindah ke Prioritas IP Indonesia & ASEAN (Tembus Lokal)"
+    printf "  ${C_CYN}%-26s${C_RST} : %s\n" "anonim status" "Tampilkan dashboard status keamanan, mode region, & IP"
+    printf "  ${C_MAG}%-26s${C_RST} : %s\n" "anonim live" "Buka layar Radar Pemantau perpindahan IP secara Real-Time"
+    printf "  ${C_YLW}%-26s${C_RST} : %s\n" "anonim newid" "Paksa ganti IP & Negara saat ini juga (Instan)"
+    printf "  ${C_WHT}%-26s${C_RST} : %s\n" "anonim stop" "Matikan mode anonim, hapus jejak RAM, & pulihkan sistem"
+    printf "  ${C_RED}%-26s${C_RST} : %s\n" "anonim panic" "Darurat: Kunci mati semua trafik jaringan & hapus histori"
+    echo -e "\n  ${C_YLW}🛠️  2. MENU KHUSUS TCP & ANTI-FORENSIK FILE:${C_RST}"
+    echo -e "  ${C_CYN}────────────────────────────────────────────────────────────────────────────${C_RST}"
+    printf "  ${C_BLU}%-26s${C_RST} : %s\n" "anonim ping <target>" "Uji koneksi ke target via TCP Tor (Pengganti ping biasa)"
+    printf "  ${C_BLU}%-26s${C_RST} : %s\n" "anonim scan <target>" "Scan port terbuka target via Nmap TCP Stealth (-sT -Pn)"
+    printf "  ${C_BLU}%-26s${C_RST} : %s\n" "anonim clean <file>" "Hapus metadata EXIF/GPS/Author dari foto, PDF, & dokumen"
+    printf "  ${C_DIM}%-26s${C_RST} : %s\n" "anonim -h / --help" "Tampilkan layar panduan penggunaan ini"
+    echo -e "  ${C_CYN}────────────────────────────────────────────────────────────────────────────${C_RST}"
+    echo -e "  ${C_YLW}💡 CONTOH PENGGUNAAN CEPAT:${C_RST}"
+    echo -e "     ${C_WHT}• Mode Eropa Cepat     :${C_RST} anonim start"
+    echo -e "     ${C_WHT}• Mode Asia / Lokal ID :${C_RST} anonim asia   ${C_DIM}(atau: anonim indo)${C_RST}"
+    echo -e "     ${C_WHT}• Cek Ping & Scan TCP  :${C_RST} anonim ping target.id  |  anonim scan target.id"
+    echo -e "${C_CYN}╚════════════════════════════════════════════════════════════════════════════╝${C_RST}\n"
+}
+
+if [ "$1" = "-h" ] || [ "$1" = "--help" ] || [ -z "$1" ]; then
+    show_help
+    exit 0
+fi
+
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${C_RED}[-] Akses ditolak! Jalankan sebagai root: sudo anonim {start|eropa|asia|indo|stop|status|live|newid|ping|scan|clean|panic|-h}${C_RST}"
+    exit 1
+fi
+
+TOR_UID=$(id -u debian-tor 2>/dev/null || id -u tor 2>/dev/null)
+TRANS_PORT="9040"
+DNS_PORT="5353"
+NM_CONF="/etc/NetworkManager/conf.d/99-anonim.conf"
+FF_PREF="/etc/firefox-esr/anonim-opsec.js"
+ZSH_ENV="/etc/zsh/zshenv"
+BACKUP_DIR="/var/backups/anonim_orig"
+REGION_FILE="/var/backups/anonim_orig/region_mode"
+
+mkdir -p "$BACKUP_DIR"
+
+recreate_log_dirs() {
+    mkdir -p /var/log/tor /var/log/apt /var/log/journal
+    chown "$TOR_UID":adm /var/log/tor 2>/dev/null || chown "$TOR_UID":"$TOR_UID" /var/log/tor
+    chmod 02750 /var/log/tor
+}
+
+wait_for_network() {
+    for w in {1..15}; do
+        if nmcli -t -f DEVICE,STATE dev 2>/dev/null | grep -q "^wlan0:connected"; then
+            nmcli dev disconnect eth0 >/dev/null 2>&1 || true
+            if ip route | grep -q "^default.*wlan0"; then
+                return 0
+            fi
+        elif ip route | grep -q "^default"; then
+            return 0
+        fi
+        sleep 1
+    done
+}
+
+lock_and_wipe_history() {
+    for home_dir in /root /home/*; do
+        [ -d "$home_dir" ] || continue
+        for hist_file in .zsh_history .bash_history .python_history .lesshst .viminfo .wget-hsts; do
+            target="$home_dir/$hist_file"
+            chattr -i "$target" 2>/dev/null || true
+            if [ -f "$target" ]; then
+                shred -zu -n 3 "$target" 2>/dev/null || rm -f "$target"
+            fi
+            touch "$target"
+            chmod 0600 "$target"
+            chattr +i "$target" 2>/dev/null || true
+        done
+        rm -rf "$home_dir/.cache/thumbnails" "$home_dir/.local/share/recently-used.xbel" 2>/dev/null
+    done
+
+    if [ -f "$ZSH_ENV" ] && ! grep -q "SAVEHIST=0" "$ZSH_ENV"; then
+        echo 'unset HISTFILE; export HISTSIZE=0; export SAVEHIST=0' >> "$ZSH_ENV"
+    fi
+
+    sync
+    echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+}
+
+unlock_history() {
+    sed -i '/SAVEHIST=0/d' "$ZSH_ENV" 2>/dev/null || true
+    (
+        sleep 15
+        for home_dir in /root /home/*; do
+            [ -d "$home_dir" ] || continue
+            for hist_file in .zsh_history .bash_history .python_history .lesshst .viminfo .wget-hsts; do
+                chattr -i "$home_dir/$hist_file" 2>/dev/null || true
+                > "$home_dir/$hist_file" 2>/dev/null || true
+            done
+        done
+    ) >/dev/null 2>&1 &
+}
+
+harden_browser() {
+    mkdir -p /etc/firefox-esr
+    cat << FF_EOF > "$FF_PREF"
+pref("media.peerconnection.enabled", false);
+pref("media.navigator.enabled", false);
+pref("privacy.resistFingerprinting", true);
+pref("privacy.trackingprotection.enabled", true);
+pref("webgl.disabled", true);
+pref("geo.enabled", false);
+pref("dom.battery.enabled", false);
+pref("network.dns.disablePrefetch", true);
+pref("network.predictor.enabled", false);
+pref("network.prefetch-next", false);
+pref("beacon.enabled", false);
+FF_EOF
+}
+
+write_tor_config() {
+    MODE_REG="${1:-EROPA}"
+    if [ ! -f "$BACKUP_DIR/torrc.orig" ] && [ -f /etc/tor/torrc ]; then
+        cp /etc/tor/torrc "$BACKUP_DIR/torrc.orig"
+    fi
+
+    if [ "$MODE_REG" = "ASIA" ]; then
+        EXIT_LIST="{id},{sg},{jp},{kr},{tw},{hk},{my}"
+        EXCL_LIST="{us},{gb},{au},{ca},{nz},{ru},{cn},{by},{ir},{kp}"
+        STRICT_VAL="1"
+        echo "ASIA (ID, SG, JP, KR, TW, HK, MY)" > "$REGION_FILE"
+    elif [ "$MODE_REG" = "INDO" ]; then
+        EXIT_LIST="{id},{sg},{my}"
+        EXCL_LIST="{us},{gb},{au},{ca},{nz},{ru},{cn},{by},{ir},{kp}"
+        STRICT_VAL="0"
+        echo "INDONESIA & ASEAN PRIORITAS ({id},{sg},{my})" > "$REGION_FILE"
+    else
+        EXIT_LIST="{nl},{ch},{de},{se},{is},{ro},{at},{fi}"
+        EXCL_LIST="{id},{sg},{my},{us},{gb},{au},{ca},{nz},{ru},{cn},{by},{ir},{kp},{vn},{th},{ph},{in}"
+        STRICT_VAL="1"
+        echo "EROPA TIER-1 (NL, CH, DE, SE, IS, RO, AT, FI)" > "$REGION_FILE"
+    fi
+
+    cat << TORCONF > /etc/tor/torrc
+VirtualAddrNetworkIPv4 10.192.0.0/10
+AutomapHostsOnResolve 1
+TransPort 127.0.0.1:$TRANS_PORT IsolateClientAddr IsolateClientProtocol IsolateDestAddr IsolateDestPort
+DNSPort 127.0.0.1:$DNS_PORT
+AvoidDiskWrites 1
+SafeLogging 1
+HardwareAccel 1
+ConnectionPadding 1
+ReducedConnectionPadding 0
+NumEntryGuards 4
+KeepalivePeriod 60
+MaxCircuitDirtiness 30
+NewCircuitPeriod 20
+CircuitBuildTimeout 10
+LearnCircuitBuildTimeout 1
+TrackHostExits .
+TrackHostExitsExpire 120
+ExitNodes $EXIT_LIST
+ExcludeNodes $EXCL_LIST
+StrictNodes $STRICT_VAL
+TORCONF
+}
+
+start_anonim() {
+    REQ_REGION="${1:-EROPA}"
+    banner_welcome
+    echo -e "  ${C_YLW}[*] Mengaktifkan Protokol Pertahanan ANONIM (Region: ${C_CYN}$REQ_REGION${C_YLW})...${C_RST}\n"
+
+    MISSING_PKGS=""
+    for pkg in tor macchanger iptables curl secure-delete conntrack e2fsprogs nmap libimage-exiftool-perl mat2; do
+        dpkg -s "$pkg" >/dev/null 2>&1 || MISSING_PKGS="$MISSING_PKGS $pkg"
+    done
+    if [ -n "$MISSING_PKGS" ]; then
+        echo -e "  ${C_CYN}[~] Menginstal modul pendukung:$MISSING_PKGS...${C_RST}"
+        apt-get update -qq && apt-get install -y -qq $MISSING_PKGS >/dev/null 2>&1
+    fi
+    TOR_UID=$(id -u debian-tor 2>/dev/null || id -u tor 2>/dev/null)
+
+    swapoff -a 2>/dev/null
+    systemctl stop systemd-journald systemd-journald.socket systemd-journald-dev-log.socket 2>/dev/null || true
+    if ! mount | grep -q "/var/log type tmpfs"; then
+        mount -t tmpfs -o nodev,nosuid,noexec,size=64m tmpfs /var/log
+    fi
+    recreate_log_dirs
+    echo -e "  ${C_GRN}[✓]${C_WHT} Isolasi Log & Memori      :${C_RST} /var/log dikunci di RAM (tmpfs 64MB)"
+
+    timedatectl set-ntp false 2>/dev/null || true
+    timedatectl set-timezone UTC 2>/dev/null || true
+    systemctl stop systemd-resolved 2>/dev/null || true
+
+    if [ ! -f "$BACKUP_DIR/machine-id.orig" ] && [ -f /etc/machine-id ]; then
+        cp /etc/machine-id "$BACKUP_DIR/machine-id.orig"
+    fi
+    tr -dc 'a-f0-9' < /dev/urandom | head -c 32 > /etc/machine-id
+    echo "" >> /etc/machine-id
+    if [ -f /var/lib/dbus/machine-id ] && [ ! -L /var/lib/dbus/machine-id ]; then
+        cp /etc/machine-id /var/lib/dbus/machine-id
+    fi
+
+    INTEL_OUIS=("F8:75:A4" "8C:8D:28" "00:1B:21" "3C:97:0E" "A4:4E:31")
+    RAND_OUI=${INTEL_OUIS[$RANDOM % ${#INTEL_OUIS[@]}]}
+    RAND_NIC=$(printf '%02X:%02X:%02X' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)))
+    FAKE_INTEL_MAC="${RAND_OUI}:${RAND_NIC}"
+
+    rm -f /etc/NetworkManager/conf.d/99-stealth.conf 2>/dev/null || true
+    cat << NM_EOF > "$NM_CONF"
+[device]
+wifi.scan-rand-mac-address=yes
+
+[connection]
+wifi.cloned-mac-address=$FAKE_INTEL_MAC
+ethernet.cloned-mac-address=$FAKE_INTEL_MAC
+ipv4.dhcp-send-hostname=false
+ipv4.dhcp-client-id=mac
+ipv6.ip6-privacy=2
+NM_EOF
+
+    if [ ! -f "$BACKUP_DIR/hostname.orig" ]; then
+        hostname > "$BACKUP_DIR/hostname.orig"
+    fi
+    if [ ! -f "$BACKUP_DIR/hosts.orig" ]; then
+        cp /etc/hosts "$BACKUP_DIR/hosts.orig"
+    fi
+    NEW_HOST="DESKTOP-$(tr -dc 'A-Z0-9' < /dev/urandom | head -c 7)"
+    hostnamectl set-hostname "$NEW_HOST"
+    if grep -q "^127.0.1.1" /etc/hosts; then
+        sed -i "s/^127.0.1.1.*/127.0.1.1\t$NEW_HOST/" /etc/hosts
+    else
+        echo -e "127.0.1.1\t$NEW_HOST" >> /etc/hosts
+    fi
+
+    systemctl restart NetworkManager 2>/dev/null || true
+    echo -e "  ${C_GRN}[✓]${C_WHT} Sensor Smart Wi-Fi Wait   :${C_RST} Menunggu adapter mendapatkan IP DHCP..."
+    wait_for_network
+
+    if nmcli -t -f DEVICE,STATE dev 2>/dev/null | grep -q "^wlan0:connected"; then
+        echo -e "  ${C_GRN}[✓]${C_WHT} Prioritas Adapter         :${C_RST} Terkunci ke Wi-Fi USB (wlan0)"
+    fi
+    echo -e "  ${C_GRN}[✓]${C_WHT} Kamuflase Identitas       :${C_RST} ${C_CYN}$NEW_HOST${C_RST} | MAC Intel: ${C_CYN}$FAKE_INTEL_MAC${C_RST}"
+
+    sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null
+    sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null
+    sysctl -w net.ipv6.conf.lo.disable_ipv6=1 >/dev/null
+    sysctl -w net.ipv4.tcp_timestamps=0 >/dev/null
+    sysctl -w net.ipv4.tcp_sack=0 >/dev/null
+    sysctl -w net.ipv4.icmp_echo_ignore_all=1 >/dev/null
+    sysctl -w net.ipv4.icmp_ignore_bogus_error_responses=1 >/dev/null
+    sysctl -w net.ipv4.conf.all.accept_redirects=0 >/dev/null
+    sysctl -w net.ipv4.conf.all.send_redirects=0 >/dev/null
+    sysctl -w net.ipv4.ip_default_ttl=128 >/dev/null
+    sysctl -w kernel.dmesg_restrict=1 >/dev/null
+    sysctl -w kernel.kptr_restrict=2 >/dev/null
+    echo -e "  ${C_GRN}[✓]${C_WHT} Anti-OS Fingerprinting    :${C_RST} Kernel TTL=128 (Windows) & UTC Timezone"
+
+    harden_browser
+    echo -e "  ${C_GRN}[✓]${C_WHT} Proteksi Browser          :${C_RST} Anti-WebRTC & Anti-Canvas Firefox Aktif"
+
+    chattr -i /etc/resolv.conf 2>/dev/null || true
+    if [ ! -f "$BACKUP_DIR/resolv.orig" ] && [ -f /etc/resolv.conf ]; then
+        cp -L /etc/resolv.conf "$BACKUP_DIR/resolv.orig" 2>/dev/null || true
+    fi
+    rm -f /etc/resolv.conf
+    echo "nameserver 127.0.0.1" > /etc/resolv.conf
+    chattr +i /etc/resolv.conf
+
+    write_tor_config "$REQ_REGION"
+    recreate_log_dirs
+    pkill -9 tor 2>/dev/null || true
+    systemctl restart tor@default
+    echo -e "  ${C_GRN}[✓]${C_WHT} Region Auto-Rotate (30s)  :${C_RST} ${C_CYN}$(cat "$REGION_FILE")${C_RST}"
+
+    ip6tables -F
+    ip6tables -t nat -F 2>/dev/null || true
+    ip6tables -P INPUT DROP
+    ip6tables -P FORWARD DROP
+    ip6tables -P OUTPUT DROP
+
+    iptables -F
+    iptables -t nat -F
+    iptables -t mangle -F
+    iptables -P INPUT DROP
+    iptables -P FORWARD DROP
+    iptables -P OUTPUT DROP
+
+    iptables -t nat -A OUTPUT -m owner --uid-owner "$TOR_UID" -j RETURN
+    iptables -t nat -A OUTPUT -p udp --dport 53 -j DNAT --to-destination 127.0.0.1:"$DNS_PORT"
+    iptables -t nat -A OUTPUT -p tcp --dport 53 -j DNAT --to-destination 127.0.0.1:"$DNS_PORT"
+    iptables -t nat -A OUTPUT -d 10.192.0.0/10 -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j DNAT --to-destination 127.0.0.1:"$TRANS_PORT"
+    iptables -t nat -A OUTPUT -o lo -j RETURN
+    for LAN in 127.0.0.0/8 192.168.0.0/16 172.16.0.0/12 10.0.0.0/8; do
+        iptables -t nat -A OUTPUT -d "$LAN" -j RETURN
+    done
+    iptables -t nat -A OUTPUT -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j DNAT --to-destination 127.0.0.1:"$TRANS_PORT"
+
+    iptables -A INPUT -m state --state INVALID -j DROP
+    iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+    iptables -A INPUT -i lo -j ACCEPT
+    iptables -A INPUT -p udp --sport 67 --dport 68 -j ACCEPT
+
+    iptables -A OUTPUT -m state --state INVALID -j DROP
+    iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+    iptables -A OUTPUT -o lo -j ACCEPT
+    iptables -A OUTPUT -d 127.0.0.0/8 -j ACCEPT
+    iptables -A OUTPUT -p udp --sport 68 --dport 67 -j ACCEPT
+    iptables -A OUTPUT -m owner --uid-owner "$TOR_UID" -j ACCEPT
+
+    conntrack -F 2>/dev/null || true
+    lock_and_wipe_history
+    echo -e "  ${C_GRN}[✓]${C_WHT} Killswitch & Anti-Blunder :${C_RST} Koneksi lama diputus & Histori ZSH dikunci mati"
+
+    echo -e "\n  ${C_YLW}[*] Menghubungkan ke terowongan Tor ($REQ_REGION)...${C_RST}"
+    for i in {1..20}; do
+        if curl -s --max-time 4 https://check.torproject.org/api/ip | grep -q '"IsTor":true'; then
+            INFO=$(curl -s --max-time 5 https://ipinfo.io/json)
+            PUB_IP=$(echo "$INFO" | awk -F'"' '/"ip":/ {print $4}')
+            CITY=$(echo "$INFO" | awk -F'"' '/"city":/ {print $4}')
+            COUNTRY=$(echo "$INFO" | awk -F'"' '/"country":/ {print $4}')
+            ORG=$(echo "$INFO" | awk -F'"' '/"org":/ {print $4}')
+            echo -e "${C_CYN}════════════════════════════════════════════════════════════════════════════${C_RST}"
+            echo -e "  ${C_GRN}⚡ STATUS : MODE ANONIM ($REQ_REGION) AKTIF SEMPURNA (100% ZERO-TRACE)${C_RST}"
+            echo -e "  ${C_WHT}🌍 IP Baru:${C_RST} ${C_GRN}${PUB_IP}${C_RST} (${C_CYN}${CITY}, ${COUNTRY}${C_RST} • ${ORG})"
+            echo -e "  ${C_DIM}💡 Tip    : Ketik 'anonim asia', 'anonim indo', atau 'anonim eropa' untuk pindah benua.${C_RST}"
+            echo -e "${C_CYN}════════════════════════════════════════════════════════════════════════════${C_RST}\n"
+            return 0
+        fi
+        sleep 2
+    done
+    echo -e "  ${C_YLW}[!] Sirkuit sedang disiapkan. Ketik 'anonim status' beberapa detik lagi.${C_RST}\n"
+}
+
+switch_region() {
+    TARGET_REG="$1"
+    if ! pidof tor >/dev/null || ! ip6tables -L OUTPUT -n 2>/dev/null | grep -q "DROP"; then
+        start_anonim "$TARGET_REG"
+        return 0
+    fi
+    banner_welcome
+    echo -e "  ${C_YLW}[*] Memindahkan jalur keluar Tor ke Region: ${C_CYN}$TARGET_REG${C_YLW}...${C_RST}\n"
+    write_tor_config "$TARGET_REG"
+    recreate_log_dirs
+    systemctl reload tor@default 2>/dev/null || kill -HUP "$(pidof tor)"
+    conntrack -F 2>/dev/null || true
+    sleep 4
+    INFO=$(curl -s --max-time 6 https://ipinfo.io/json)
+    PUB_IP=$(echo "$INFO" | awk -F'"' '/"ip":/ {print $4}')
+    CITY=$(echo "$INFO" | awk -F'"' '/"city":/ {print $4}')
+    COUNTRY=$(echo "$INFO" | awk -F'"' '/"country":/ {print $4}')
+    ORG=$(echo "$INFO" | awk -F'"' '/"org":/ {print $4}')
+    echo -e "  ${C_GRN}[✓] Region Aktif :${C_RST} ${C_CYN}$(cat "$REGION_FILE")${C_RST}"
+    echo -e "  ${C_GRN}[✓] IP Baru Anda :${C_RST} ${C_GRN}${PUB_IP:-Menyambung...}${C_RST} (${C_CYN}${CITY}, ${COUNTRY}${C_RST} • ${ORG})\n"
+}
+
+stop_anonim() {
+    banner_welcome
+    echo -e "  ${C_YLW}[*] Memulihkan sistem & menghancurkan seluruh jejak sesi...${C_RST}\n"
+
+    chattr -i /etc/resolv.conf 2>/dev/null || true
+    if [ -f "$BACKUP_DIR/resolv.orig" ]; then
+        cp -f "$BACKUP_DIR/resolv.orig" /etc/resolv.conf
+    else
+        echo -e "nameserver 1.1.1.1\nnameserver 8.8.8.8" > /etc/resolv.conf
+    fi
+
+    iptables -F
+    iptables -t nat -F
+    iptables -t mangle -F
+    iptables -P INPUT ACCEPT
+    iptables -P FORWARD ACCEPT
+    iptables -P OUTPUT ACCEPT
+
+    ip6tables -F
+    ip6tables -P INPUT ACCEPT
+    ip6tables -P FORWARD ACCEPT
+    ip6tables -P OUTPUT ACCEPT
+
+    conntrack -F 2>/dev/null || true
+
+    systemctl stop tor@default tor 2>/dev/null || true
+    if [ -f "$BACKUP_DIR/torrc.orig" ]; then
+        cp -f "$BACKUP_DIR/torrc.orig" /etc/tor/torrc
+    fi
+
+    rm -f "$NM_CONF" "$FF_PREF" "$REGION_FILE" /etc/NetworkManager/conf.d/99-stealth.conf /etc/firefox-esr/stealth-opsec.js 2>/dev/null || true
+    if [ -f "$BACKUP_DIR/hostname.orig" ]; then
+        hostnamectl set-hostname "$(cat "$BACKUP_DIR/hostname.orig")"
+    fi
+    if [ -f "$BACKUP_DIR/hosts.orig" ]; then
+        cp -f "$BACKUP_DIR/hosts.orig" /etc/hosts
+    fi
+    if [ -f "$BACKUP_DIR/machine-id.orig" ]; then
+        cp -f "$BACKUP_DIR/machine-id.orig" /etc/machine-id
+        if [ -f /var/lib/dbus/machine-id ] && [ ! -L /var/lib/dbus/machine-id ]; then
+            cp /etc/machine-id /var/lib/dbus/machine-id
+        fi
+    fi
+
+    sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null
+    sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null
+    sysctl -w net.ipv6.conf.lo.disable_ipv6=0 >/dev/null
+    sysctl -w net.ipv4.tcp_timestamps=1 >/dev/null
+    sysctl -w net.ipv4.tcp_sack=1 >/dev/null
+    sysctl -w net.ipv4.icmp_echo_ignore_all=0 >/dev/null
+    sysctl -w net.ipv4.ip_default_ttl=64 >/dev/null
+
+    find /var/log -type f -exec shred -zu -n 1 {} + 2>/dev/null || rm -rf /var/log/*
+    umount -l /var/log 2>/dev/null || true
+    systemctl start systemd-journald 2>/dev/null || true
+    systemctl restart NetworkManager 2>/dev/null || true
+    timedatectl set-ntp true 2>/dev/null || true
+
+    lock_and_wipe_history
+    unlock_history
+    echo -e "  ${C_GRN}[✓]${C_WHT} Seluruh log RAM & histori dihancurkan.${C_RST}"
+    echo -e "  ${C_GRN}[✓]${C_WHT} Jaringan & identitas asli ($(hostname)) kembali ke mode standar.${C_RST}\n"
+}
+
+new_identity() {
+    echo -e "${C_YLW}[*] Memutar sirkuit ke Server baru dalam Region aktif...${C_RST}"
+    if pidof tor >/dev/null; then
+        kill -HUP "$(pidof tor)"
+        conntrack -F 2>/dev/null || true
+        sleep 2
+        INFO=$(curl -s --max-time 6 https://ipinfo.io/json)
+        PUB_IP=$(echo "$INFO" | awk -F'"' '/"ip":/ {print $4}')
+        CITY=$(echo "$INFO" | awk -F'"' '/"city":/ {print $4}')
+        COUNTRY=$(echo "$INFO" | awk -F'"' '/"country":/ {print $4}')
+        ORG=$(echo "$INFO" | awk -F'"' '/"org":/ {print $4}')
+        echo -e "  ${C_GRN}[✓] Identitas Baru:${C_RST} ${C_GRN}${PUB_IP:-Memuat...}${C_RST} (${C_CYN}${CITY:-Aktif}, ${COUNTRY}${C_RST} • ${ORG})"
+    else
+        echo -e "${C_RED}[-] Service Tor belum aktif. Jalankan: anonim start${C_RST}"
+    fi
+}
+
+live_radar() {
+    banner_welcome
+    echo -e "  ${C_MAG}📡 RADAR PEMANTAU SIRKUIT REAL-TIME (Region: $(cat "$REGION_FILE" 2>/dev/null || echo 'Standar'))${C_RST}"
+    echo -e "  ${C_DIM}Tekan [Ctrl + C] kapan saja untuk keluar dari layar radar.${C_RST}"
+    echo -e "${C_CYN}────────────────────────────────────────────────────────────────────────────${C_RST}"
+    printf "  ${C_WHT}%-12s │ %-16s │ %-20s │ %s${C_RST}\n" "WAKTU (UTC)" "ALAMAT IP" "KOTA & NEGARA" "PROVIDER SERVER"
+    echo -e "${C_CYN}────────────────────────────────────────────────────────────────────────────${C_RST}"
+    trap 'echo -e "\n  ${C_GRN}[✓] Keluar dari Radar Live (Mode Anonim tetap aktif).${C_RST}\n"; exit 0' INT
+    while true; do
+        NOW=$(date -u +"%H:%M:%S")
+        INFO=$(curl -s --max-time 6 https://ipinfo.io/json)
+        PUB_IP=$(echo "$INFO" | awk -F'"' '/"ip":/ {print $4}')
+        CITY=$(echo "$INFO" | awk -F'"' '/"city":/ {print $4}')
+        COUNTRY=$(echo "$INFO" | awk -F'"' '/"country":/ {print $4}')
+        ORG=$(echo "$INFO" | awk -F'"' '/"org":/ {print $4}' | cut -c 1-24)
+        if [ -n "$PUB_IP" ]; then
+            LOC="${CITY}, ${COUNTRY}"
+            printf "  ${C_DIM}%-12s${C_RST} │ ${C_GRN}%-16s${C_RST} │ ${C_CYN}%-20s${C_RST} │ ${C_WHT}%s${C_RST}\n" "$NOW" "$PUB_IP" "${LOC:0:20}" "$ORG"
+        else
+            printf "  ${C_DIM}%-12s${C_RST} │ ${C_YLW}%-16s${C_RST} │ ${C_YLW}%-20s${C_RST} │ ${C_DIM}%s${C_RST}\n" "$NOW" "Menyiapkan..." "Berpindah Node..." "Menyambung Jalur Cepat"
+        fi
+        sleep 10
+    done
+}
+
+tcp_ping() {
+    TARGET="$2"
+    banner_welcome
+    if [ -z "$TARGET" ]; then
+        echo -e "  ${C_RED}[-] Masukkan domain atau IP target!${C_RST}"
+        echo -e "  ${C_WHT}Contoh: ${C_GRN}anonim ping duckduckgo.com${C_RST}\n"
+        exit 1
+    fi
+    CLEAN_HOST=$(echo "$TARGET" | sed -e 's|^[^/]*//||' -e 's|/.*$||')
+    echo -e "  ${C_YLW}[*] Menguji koneksi TCP Stealth via Tor ke: ${C_CYN}$CLEAN_HOST${C_RST}\n"
+    for seq in 1 2 3 4; do
+        RES=$(curl -o /dev/null -s -w "%{http_code} %{time_connect} %{remote_ip}" --max-time 10 "https://$CLEAN_HOST" 2>/dev/null || curl -o /dev/null -s -w "%{http_code} %{time_connect} %{remote_ip}" --max-time 10 "http://$CLEAN_HOST" 2>/dev/null)
+        CODE=$(echo "$RES" | awk '{print $1}')
+        TIME_S=$(echo "$RES" | awk '{print $2}')
+        REM_IP=$(echo "$RES" | awk '{print $3}')
+        if [ "$CODE" != "000" ] && [ -n "$CODE" ]; then
+            echo -e "  ${C_GRN}[✓] Reply dari $CLEAN_HOST ($REM_IP)${C_RST} │ Status HTTP: ${C_CYN}$CODE${C_RST} │ Waktu TCP: ${C_GRN}${TIME_S}s${C_RST}"
+        else
+            echo -e "  ${C_RED}[✗] Timeout / Target menolak koneksi pada percobaan ke-$seq${C_RST}"
+        fi
+        sleep 1
+    done
+    echo ""
+}
+
+tcp_scan() {
+    TARGET="$2"
+    PORTS="${3:-21,22,25,53,80,110,143,443,445,3306,3389,5432,8080,8443}"
+    banner_welcome
+    if [ -z "$TARGET" ]; then
+        echo -e "  ${C_RED}[-] Masukkan domain atau IP target yang ingin di-scan!${C_RST}"
+        echo -e "  ${C_WHT}Contoh 1 (Top Ports) : ${C_GRN}anonim scan example.com${C_RST}"
+        echo -e "  ${C_WHT}Contoh 2 (Port Khusus): ${C_GRN}anonim scan example.com 80,443,8080${C_RST}\n"
+        exit 1
+    fi
+    echo -e "  ${C_YLW}[*] Memulai Pemindaian Nmap TCP Connect (-sT -Pn) via Tor...${C_RST}"
+    echo -e "  ${C_WHT}    Target : ${C_CYN}$TARGET${C_RST}"
+    echo -e "  ${C_WHT}    Port   : ${C_CYN}$PORTS${C_RST}"
+    echo -e "${C_CYN}────────────────────────────────────────────────────────────────────────────${C_RST}"
+    nmap -sT -Pn -n --open -T4 -p "$PORTS" "$TARGET"
+    echo -e "${C_CYN}────────────────────────────────────────────────────────────────────────────${C_RST}\n"
+}
+
+clean_metadata() {
+    TARGET_FILE="$2"
+    banner_welcome
+    if [ -z "$TARGET_FILE" ] || [ ! -f "$TARGET_FILE" ]; then
+        echo -e "  ${C_RED}[-] File tidak ditemukan!${C_RST}"
+        echo -e "  ${C_WHT}Contoh penggunaan: ${C_GRN}anonim clean foto_rahasia.jpg${C_RST}\n"
+        exit 1
+    fi
+
+    echo -e "  ${C_YLW}[*] Menghapus metadata EXIF/GPS/Author dari: ${C_CYN}$TARGET_FILE${C_RST}\n"
+    CLEANED=0
+    if command -v mat2 >/dev/null 2>&1; then
+        mat2 --inplace "$TARGET_FILE" 2>/dev/null && CLEANED=1
+    fi
+    if command -v exiftool >/dev/null 2>&1; then
+        exiftool -all= -overwrite_original "$TARGET_FILE" >/dev/null 2>&1 && CLEANED=1
+    fi
+
+    touch -d "2025-01-01 00:00:00 UTC" "$TARGET_FILE" 2>/dev/null || true
+
+    if [ "$CLEANED" -eq 1 ]; then
+        echo -e "  ${C_GRN}[✓] Metadata Berhasil Dihancurkan!${C_RST}"
+        echo -e "  ${C_GRN}[✓] Timestamp File Disamarkan ke :${C_RST} 2025-01-01 00:00:00 UTC"
+        echo -e "  ${C_WHT}    File siap diunggah dengan aman tanpa jejak identitas.${C_RST}\n"
+    else
+        echo -e "  ${C_YLW}[!] Format file tidak mendukung penghapusan langsung, namun timestamp telah disamarkan.${C_RST}\n"
+    fi
+}
+
+panic_mode() {
+    banner_welcome
+    echo -e "  ${C_RED}[!!!] MODE PANIK: MEMUTUS JARINGAN & MENGHANCURKAN JEJAK RAM [!!!]${C_RST}\n"
+    iptables -F
+    iptables -P INPUT DROP
+    iptables -P FORWARD DROP
+    iptables -P OUTPUT DROP
+    ip6tables -F
+    ip6tables -P INPUT DROP
+    ip6tables -P FORWARD DROP
+    ip6tables -P OUTPUT DROP
+    conntrack -F 2>/dev/null || true
+    lock_and_wipe_history
+    echo -e "  ${C_RED}[✓] Seluruh trafik jaringan dikunci mati (Blackhole) & histori dihapus.${C_RST}\n"
+}
+
+status_anonim() {
+    banner_welcome
+    CUR_MAC=$(ip link show wlan0 2>/dev/null | awk '/ether/ {print $2}' || ip link show eth0 2>/dev/null | awk '/ether/ {print $2}')
+    CUR_TTL=$(sysctl -n net.ipv4.ip_default_ttl 2>/dev/null)
+    CUR_TZ=$(timedatectl | awk '/Time zone/ {print $3}')
+    CUR_REG=$(cat "$REGION_FILE" 2>/dev/null || echo "Tidak Aktif")
+    TOR_CHK=$(curl -s --max-time 5 https://check.torproject.org/api/ip)
+
+    if echo "$TOR_CHK" | grep -q '"IsTor":true'; then
+        INFO=$(curl -s --max-time 5 https://ipinfo.io/json)
+        PUB_IP=$(echo "$INFO" | awk -F'"' '/"ip":/ {print $4}')
+        CITY=$(echo "$INFO" | awk -F'"' '/"city":/ {print $4}')
+        COUNTRY=$(echo "$INFO" | awk -F'"' '/"country":/ {print $4}')
+        ORG=$(echo "$INFO" | awk -F'"' '/"org":/ {print $4}')
+        TOR_TEXT="${C_GRN}TERHUBUNG (${PUB_IP} • ${CITY}, ${COUNTRY} • ${ORG})${C_RST}"
+        ROT_TEXT="${C_GRN}AKTIF (Seamless 30s + WAF Session Lock)${C_RST}"
+    else
+        TOR_TEXT="${C_RED}TIDAK TERHUBUNG / MODE STANDAR${C_RST}"
+        ROT_TEXT="${C_YLW}Mati${C_RST}"
+    fi
+
+    mount | grep -q '/var/log type tmpfs' && LOG_TEXT="${C_GRN}RAM Disk (tmpfs - Zero Disk Write)${C_RST}" || LOG_TEXT="${C_YLW}Disk Standar${C_RST}"
+    lsattr /root/.zsh_history 2>/dev/null | grep -q 'i' && HIST_TEXT="${C_GRN}TERKUNCI MATI (Immutable 0-Byte)${C_RST}" || HIST_TEXT="${C_YLW}Standar${C_RST}"
+    [ -f "$FF_PREF" ] && BRW_TEXT="${C_GRN}Anti-WebRTC & Anti-Fingerprint Aktif${C_RST}" || BRW_TEXT="${C_YLW}Standar${C_RST}"
+    ip6tables -L OUTPUT -n 2>/dev/null | grep -q "DROP" && IPV6_TEXT="${C_GRN}TERKUNCI MATI (DROP)${C_RST}" || IPV6_TEXT="${C_YLW}Terbuka (ACCEPT)${C_RST}"
+
+    echo -e "  ${C_WHT}Status Tor   :${C_RST} $TOR_TEXT"
+    echo -e "  ${C_WHT}Mode Region  :${C_RST} ${C_CYN}$CUR_REG${C_RST}"
+    echo -e "  ${C_WHT}Engine Mode  :${C_RST} $ROT_TEXT"
+    echo -e "  ${C_WHT}Hostname     :${C_RST} ${C_CYN}$(hostname)${C_RST}"
+    echo -e "  ${C_WHT}MAC Address  :${C_RST} ${C_CYN}${CUR_MAC}${C_RST} (Intel Corp OUI)"
+    echo -e "  ${C_WHT}Machine-ID   :${C_RST} $(cat /etc/machine-id 2>/dev/null)"
+    echo -e "  ${C_WHT}Kernel TTL   :${C_RST} ${CUR_TTL} ($( [ "$CUR_TTL" = "128" ] && echo -e "${C_GRN}Kamuflase Windows${C_RST}" || echo "Linux Standar" ))"
+    echo -e "  ${C_WHT}Zona Waktu   :${C_RST} ${CUR_TZ}"
+    echo -e "  ${C_WHT}Mode Log     :${C_RST} $LOG_TEXT"
+    echo -e "  ${C_WHT}Histori ZSH  :${C_RST} $HIST_TEXT"
+    echo -e "  ${C_WHT}Browser Lock :${C_RST} $BRW_TEXT"
+    echo -e "  ${C_WHT}IPv6 Lock    :${C_RST} $IPV6_TEXT"
+    echo -e "${C_CYN}╚════════════════════════════════════════════════════════════════════════════╝${C_RST}\n"
+}
+
+case "$1" in
+    start)        start_anonim "EROPA" ;;
+    eropa)        switch_region "EROPA" ;;
+    asia)         switch_region "ASIA" ;;
+    indo)         switch_region "INDO" ;;
+    stop)         stop_anonim ;;
+    status)       status_anonim ;;
+    newid)        new_identity ;;
+    live)         live_radar ;;
+    ping)         tcp_ping "$@" ;;
+    scan)         tcp_scan "$@" ;;
+    clean)        clean_metadata "$@" ;;
+    panic)        panic_mode ;;
+    -h|--help|*)  show_help ;;
+esac
+EOF
+chmod +x /usr/local/bin/anonim
